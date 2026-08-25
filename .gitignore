@@ -1,0 +1,19 @@
+# Environment variables & API secrets
+.env
+.env.*
+
+# Local SQLite databases & local caches
+*.db
+*.db-journal
+garmin_cache/
+.garminconnect/
+
+# Python Virtual Environment & Bytecode
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Operating System files
+.DS_Store
+Thumbs.db

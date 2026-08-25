@@ -511,16 +511,68 @@ elif view_mode == "🔍 Activity Inspector":
     
     st.markdown("---")
     
-    # 2. GPS Map Rendering
+    # 2. GPS Map Rendering with Speed-Colored Polyline
     has_gps = pd.notna(selected_act.get("start_lat")) and pd.notna(selected_act.get("start_lon"))
+    filename = str(selected_act.get("filename", ""))
+    
+    track_df = pd.DataFrame()
+    if filename and os.path.exists(filename):
+        if filename.endswith(".fit"):
+            with open(filename, "rb") as f:
+                track_df = parse_fit_file(f.read())
+        elif filename.endswith(".gpx"):
+            with open(filename, "r", encoding="utf-8") as f:
+                track_df = parse_gpx_file(f.read())
+
     if has_gps:
         st.markdown("#### 🗺️ Route Map")
         start_coords = [selected_act["start_lat"], selected_act["start_lon"]]
-        m = folium.Map(location=start_coords, zoom_start=13, tiles="CartoDB dark_matter")
-        folium.Marker(start_coords, popup="Start Location", icon=folium.Icon(color="green")).add_to(m)
-        if pd.notna(selected_act.get("end_lat")):
-            folium.Marker([selected_act["end_lat"], selected_act["end_lon"]], popup="End Location", icon=folium.Icon(color="red")).add_to(m)
-        st_folium(m, width="100%", height=400)
+        m = folium.Map(location=start_coords, zoom_start=12, tiles="CartoDB dark_matter")
+        
+        if not track_df.empty and "lat" in track_df.columns and "lon" in track_df.columns and "Speed (mph)" in track_df.columns:
+            track_clean = track_df.dropna(subset=["lat", "lon", "Speed (mph)"]).copy()
+            if len(track_clean) > 1:
+                points = list(zip(track_clean["lat"], track_clean["lon"]))
+                speeds = track_clean["Speed (mph)"].tolist()
+                
+                min_spd, max_spd = min(speeds), max(speeds)
+                if min_spd == max_spd: max_spd += 1.0
+                
+                colormap = LinearColormap(
+                    colors=["#00B4D8", "#70E000", "#FFD166", "#EF476F"],
+                    vmin=min_spd, vmax=max_spd
+                )
+                colormap.caption = "Speed (mph)"
+                
+                ColorLine(
+                    points,
+                    colors=speeds,
+                    colormap=colormap,
+                    weight=5,
+                    opacity=0.9
+                ).add_to(m)
+                colormap.add_to(m)
+        else:
+            # Fallback simple line if full track stream isn't saved locally
+            folium.Marker(start_coords, popup="Start", icon=folium.Icon(color="green")).add_to(m)
+            if pd.notna(selected_act.get("end_lat")):
+                folium.Marker([selected_act["end_lat"], selected_act["end_lon"]], popup="Finish", icon=folium.Icon(color="red")).add_to(m)
+
+        st_folium(m, width="100%", height=450)
+        
+        # 3. Telemetry Profiles
+        if not track_df.empty:
+            st.markdown("#### 📊 Telemetry Profiles")
+            tcol1, tcol2 = st.columns(2)
+            if "Heart Rate (bpm)" in track_df.columns and track_df["Heart Rate (bpm)"].max() > 0:
+                fig_hr = px.line(track_df, y="Heart Rate (bpm)", title="Heart Rate Profile", color_discrete_sequence=["#FF4B4B"])
+                fig_hr.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#E0E1DD"))
+                tcol1.plotly_chart(fig_hr, use_container_width=True)
+                
+            if "Elevation (ft)" in track_df.columns:
+                fig_ele = px.area(track_df, y="Elevation (ft)", title="Elevation Profile", color_discrete_sequence=["#70E000"])
+                fig_ele.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#E0E1DD"))
+                tcol2.plotly_chart(fig_ele, use_container_width=True)
     else:
         st.info("No GPS coordinate track available for this activity.")
 

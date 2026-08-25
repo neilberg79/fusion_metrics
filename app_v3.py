@@ -18,20 +18,20 @@ from streamlit_folium import st_folium
 from garminconnect import Garmin
 from dotenv import load_dotenv
 
-# Load environment variables from .env file if present
+# Load environment variables from .env file if present locally
 load_dotenv()
-
-def get_secret(key_name, default=""):
-    """Reads secrets from Streamlit Cloud Secrets or local .env environment variables."""
-    if hasattr(st, "secrets") and key_name in st.secrets:
-        return st.secrets[key_name]
-    return os.getenv(key_name, default)
 
 st.set_page_config(
     page_title="Fusion Metrics | Fitness Telemetry Engine",
     page_icon="⚡",
     layout="wide"
 )
+
+# Helper function to read secrets locally (.env / os.getenv) or on Streamlit Cloud (st.secrets)
+def get_secret(key_name, default=""):
+    if hasattr(st, "secrets") and key_name in st.secrets:
+        return st.secrets[key_name]
+    return os.getenv(key_name, default)
 
 # -------------------------------------------------------------------
 # FUSION METRICS Custom CSS & Theme Styling
@@ -123,7 +123,7 @@ def get_activity_emoji(activity_type_str):
     return "⚡"
 
 # -------------------------------------------------------------------
-# Database Initialization & Unified Schema
+# Database Initialization & Schema
 # -------------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -347,7 +347,9 @@ if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
 else:
     start_date, end_date = default_start, default_end
 
-# Credentials Handling using get_secret
+# -------------------------------------------------------------------
+# Garmin Live Sync Button Execution Handler
+# -------------------------------------------------------------------
 if data_source == "Garmin Connect (Live)":
     st.sidebar.markdown("---")
     default_email = get_secret("GARMIN_EMAIL")
@@ -357,8 +359,66 @@ if data_source == "Garmin Connect (Live)":
         g_email = st.text_input("Email", value=default_email, autocomplete="username")
         g_password = st.text_input("Password", value=default_password, type="password", autocomplete="current-password")
 
-    col_btn1, col_btn2 = st.sidebar.columns([2, 1])
-    force_refresh = col_btn1.button("🔄 Sync Live", type="primary", use_container_width=True)
+    force_refresh = st.sidebar.button("🔄 Sync Live", type="primary", use_container_width=True)
+
+    if force_refresh:
+        if not g_email or not g_password:
+            st.sidebar.error("Please provide your Garmin email and password.")
+        else:
+            with st.spinner("Authenticating and downloading Garmin activities..."):
+                try:
+                    # Initialize Garmin client
+                    garmin = Garmin(g_email, g_password)
+                    garmin.login()
+                    
+                    # Fetch latest 40 activities
+                    activities = garmin.get_activities(0, 40)
+                    
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    
+                    added_count = 0
+                    for act in activities:
+                        act_id = f"garmin_{act['activityId']}"
+                        act_date = act.get("startTimeLocal", "")
+                        act_name = act.get("activityName", "Garmin Activity")
+                        act_type = act.get("activityType", {}).get("typeKey", "workout")
+                        dist_mi = (act.get("distance", 0) or 0) * 0.000621371
+                        mov_sec = act.get("duration", 0) or 0
+                        avg_spd = (act.get("averageSpeed", 0) or 0) * 2.23694
+                        max_spd = (act.get("maxSpeed", 0) or 0) * 2.23694
+                        avg_hr = act.get("averageHR", 0) or 0
+                        max_hr = act.get("maxHR", 0) or 0
+                        st_lat = act.get("startLatitude")
+                        st_lon = act.get("startLongitude")
+                        end_lat = act.get("endLatitude")
+                        end_lon = act.get("endLongitude")
+
+                        c.execute("""
+                            INSERT INTO activities (
+                                activity_id, provider, activity_date, activity_name, activity_type,
+                                distance_mi, moving_time_sec, max_speed_mph, avg_speed_mph,
+                                max_hr, avg_hr, start_lat, start_lon, end_lat, end_lon
+                            ) VALUES (?, 'garmin_live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(activity_id) DO UPDATE SET
+                                activity_name=excluded.activity_name,
+                                avg_speed_mph=excluded.avg_speed_mph,
+                                distance_mi=excluded.distance_mi,
+                                moving_time_sec=excluded.moving_time_sec
+                        """, (act_id, act_date, act_name, act_type, dist_mi, mov_sec, max_spd, avg_spd, max_hr, avg_hr, st_lat, st_lon, end_lat, end_lon))
+                        added_count += 1
+
+                    conn.commit()
+                    conn.close()
+                    
+                    # Update matched route clusters with newly ingested activities
+                    update_route_clusters()
+                    
+                    st.sidebar.success(f"Successfully ingested {added_count} activities!")
+                    st.rerun()
+
+                except Exception as e:
+                    st.sidebar.error(f"Garmin Sync Error: {str(e)}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 Re-cluster Matched Routes", use_container_width=True):

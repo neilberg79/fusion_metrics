@@ -472,20 +472,25 @@ view_mode = st.radio(
 
 if view_mode == "📋 Activity Log":
     st.subheader("📊 Activity Log")
+    
+    # Create a display copy to format moving_time_sec into hh:mm:ss
+    df_display = df_all.copy()
+    df_display["Moving Time"] = pd.to_timedelta(df_display["moving_time_sec"], unit="s").apply(
+        lambda x: f"{int(x.total_seconds()//3600):02d}:{int((x.total_seconds()%3600)//60):02d}:{int(x.total_seconds()%60):02d}"
+    )
+
     st.dataframe(
-        df_all[["Display Label", "activity_type", "distance_mi", "moving_time_sec", "avg_speed_mph", "max_speed_mph"]].rename(
+        df_display[["Display Label", "activity_type", "distance_mi", "Moving Time", "avg_speed_mph", "max_speed_mph"]].rename(
             columns={
                 "Display Label": "Activity / Date",
                 "activity_type": "Type", 
                 "distance_mi": "Distance (mi)", 
-                "moving_time_sec": "Moving Time", 
                 "avg_speed_mph": "Avg Speed (mph)", 
                 "max_speed_mph": "Max Speed (mph)"
             }
         ),
         column_config={
             "Distance (mi)": st.column_config.NumberColumn(format="%.2f mi"),
-            "Moving Time": st.column_config.DurationColumn("Moving Time", format="hh:mm:ss"),
             "Avg Speed (mph)": st.column_config.NumberColumn(format="%.1f mph"),
             "Max Speed (mph)": st.column_config.NumberColumn(format="%.1f mph")
         },

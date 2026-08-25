@@ -33,17 +33,6 @@ def get_secret(key_name, default=""):
         return st.secrets[key_name]
     return os.getenv(key_name, default)
 
-# Helper function to format seconds into hh:mm:ss
-def format_seconds(seconds):
-    try:
-        s = int(seconds or 0)
-        hrs = s // 3600
-        mins = (s % 3600) // 60
-        secs = s % 60
-        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
-    except:
-        return "00:00:00"
-
 # -------------------------------------------------------------------
 # FUSION METRICS Custom CSS & Theme Styling
 # -------------------------------------------------------------------
@@ -383,7 +372,7 @@ if data_source == "Garmin Connect (Live)":
                     garmin.login()
                     
                     # Fetch latest 40 activities
-                    activities = garmin.get_activities(0, 40)
+                    activities = garmin.get_activities(0, 1000)
                     
                     conn = sqlite3.connect(DB_PATH)
                     c = conn.cursor()
@@ -484,8 +473,11 @@ view_mode = st.radio(
 if view_mode == "📋 Activity Log":
     st.subheader("📊 Activity Log")
     
+    # Create a display copy to format moving_time_sec into hh:mm:ss
     df_display = df_all.copy()
-    df_display["Moving Time"] = df_display["moving_time_sec"].apply(format_seconds)
+    df_display["Moving Time"] = pd.to_timedelta(df_display["moving_time_sec"], unit="s").apply(
+        lambda x: f"{int(x.total_seconds()//3600):02d}:{int((x.total_seconds()%3600)//60):02d}:{int(x.total_seconds()%60):02d}"
+    )
 
     st.dataframe(
         df_display[["Display Label", "activity_type", "distance_mi", "Moving Time", "avg_speed_mph", "max_speed_mph"]].rename(
@@ -571,15 +563,14 @@ elif view_mode == "🚴 Matched Routes":
 
         st.markdown("#### Itemized Route Efforts")
         route_efforts["Pace Delta"] = route_efforts["avg_speed_mph"] - all_time_avg_speed
-        route_efforts["Moving Time"] = route_efforts["moving_time_sec"].apply(format_seconds)
-
         st.dataframe(
-            route_efforts[["activity_date", "activity_name", "avg_speed_mph", "Pace Delta", "Moving Time", "distance_mi"]].sort_values("activity_date", ascending=False),
+            route_efforts[["activity_date", "activity_name", "avg_speed_mph", "Pace Delta", "moving_time_sec", "distance_mi"]].sort_values("activity_date", ascending=False),
             column_config={
                 "activity_date": "Date",
                 "activity_name": "Activity",
                 "avg_speed_mph": st.column_config.NumberColumn("Speed", format="%.1f mph"),
                 "Pace Delta": st.column_config.NumberColumn("+/- All-Time Avg", format="%+.1f mph"),
+                "moving_time_sec": st.column_config.DurationColumn("Moving Time", format="hh:mm:ss"),
                 "distance_mi": st.column_config.NumberColumn("Distance", format="%.2f mi")
             },
             hide_index=True,
